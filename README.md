@@ -4,8 +4,8 @@ PulseChat is a full-stack chat application built with Next.js and SQLite. It sup
 
 ## Submission Links
 
-- Public GitHub Repository: ADD_YOUR_GITHUB_REPO_LINK_HERE
-- Live Deployed Application: ADD_YOUR_DEPLOYED_LINK_HERE
+- Public GitHub Repository: https://github.com/Adiraj34/Pulsechat
+- Live Deployed Application: Pending deployment
 
 ## Project Overview
 

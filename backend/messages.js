@@ -1,4 +1,4 @@
-import db from "@/lib/db";
+import db from "@/backend/db";
 
 function mapMessage(row) {
   return {
@@ -8,7 +8,7 @@ function mapMessage(row) {
     content: row.content,
     createdAt: row.created_at,
     isDeletedForEveryone: Boolean(row.is_deleted_for_everyone),
-    isPinned: Boolean(row.is_pinned)
+    isPinned: Boolean(row.is_pinned),
   };
 }
 
@@ -40,7 +40,7 @@ export function createMessage({ senderId, senderName, content }) {
       `
         INSERT INTO messages (sender_id, sender_name, content, created_at)
         VALUES (?, ?, ?, ?)
-      `
+      `,
     )
     .run(senderId, senderName, content, createdAt);
 
@@ -50,7 +50,7 @@ export function createMessage({ senderId, senderName, content }) {
         SELECT id, sender_id, sender_name, content, created_at, is_deleted_for_everyone, is_pinned
         FROM messages
         WHERE id = ?
-      `
+      `,
     )
     .get(result.lastInsertRowid);
 
@@ -63,7 +63,7 @@ export function hideMessageForUser(messageId, userId) {
     `
       INSERT OR IGNORE INTO message_hidden (message_id, user_id, created_at)
       VALUES (?, ?, ?)
-    `
+    `,
   ).run(messageId, userId, createdAt);
 }
 
@@ -75,7 +75,7 @@ export function deleteMessageForEveryone(messageId) {
           is_deleted_for_everyone = 1,
           is_pinned = 0
       WHERE id = ?
-    `
+    `,
   ).run(messageId);
 }
 
@@ -85,7 +85,7 @@ export function setPinnedState(messageId, pinned) {
       UPDATE messages
       SET is_pinned = ?
       WHERE id = ? AND is_deleted_for_everyone = 0
-    `
+    `,
   ).run(pinned ? 1 : 0, messageId);
 }
 
@@ -96,7 +96,7 @@ export function getMessageById(messageId) {
         SELECT id, sender_id, sender_name, content, created_at, is_deleted_for_everyone, is_pinned
         FROM messages
         WHERE id = ?
-      `
+      `,
     )
     .get(messageId);
 

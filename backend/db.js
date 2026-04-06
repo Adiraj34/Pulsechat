@@ -2,11 +2,21 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
-const dataDirectory = path.join(process.cwd(), "data");
-const databasePath = path.join(dataDirectory, "chat.db");
+const configuredDatabasePath = process.env.DATABASE_PATH?.trim();
+const configuredDataDirectory = process.env.DATABASE_DIR?.trim();
 
-if (!fs.existsSync(dataDirectory)) {
-  fs.mkdirSync(dataDirectory, { recursive: true });
+const dataDirectory = configuredDataDirectory
+  ? path.resolve(configuredDataDirectory)
+  : path.join(process.cwd(), "backend", "data");
+
+const databasePath = configuredDatabasePath
+  ? path.resolve(configuredDatabasePath)
+  : path.join(dataDirectory, "chat.db");
+
+const databaseDirectory = path.dirname(databasePath);
+
+if (!fs.existsSync(databaseDirectory)) {
+  fs.mkdirSync(databaseDirectory, { recursive: true });
 }
 
 const db = new Database(databasePath, { timeout: 5000 });

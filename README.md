@@ -1,45 +1,46 @@
-# PulseChat
+# FinVeil Control Center
 
-PulseChat is a full-stack chat application built with Next.js and SQLite. It supports sending and receiving messages, delete-for-me, delete-for-everyone, pinning, persistent storage, and lightweight real-time updates.
+FinVeil Control Center is a full-stack finance dashboard submission built for the **Finance Data Processing and Access Control Backend** assignment. It combines a role-aware backend with a polished frontend so the reviewer can inspect APIs, permissions, validations, and dashboard workflows in one runnable project.
 
-## Submission Links
+## What This Project Covers
 
-- Public GitHub Repository: https://github.com/Adiraj34/Pulsechat
-- Live Deployed Application: Pending deployment
+This implementation directly addresses the assignment requirements:
 
-## Project Overview
-
-PulseChat is a team chat room that demonstrates real-world message workflows:
-
-- Send and read messages in a shared room
-- Delete a message only for the current user profile (delete-for-me)
-- Delete a message for all users with an audit-friendly placeholder
-- Pin and unpin important messages
-- Persist messages in SQLite and restore on refresh
-- Poll for updates to simulate near real-time behavior
-
-## Project Structure
-
-- frontend/ contains UI files (chat page and global styles).
-- backend/ contains server-side modules (database, message services, and route handlers).
-- app/ contains thin Next.js entry files for pages and API route mapping.
-- backend/data/ stores SQLite database files.
+- User creation and management
+- Role-based access control for `viewer`, `analyst`, and `admin`
+- Active and inactive user states
+- Financial record CRUD with filtering and pagination
+- Dashboard summary APIs for totals, category breakdowns, recent activity, and monthly trends
+- Backend validation and structured error handling
+- Persistent storage using SQLite
+- A basic but polished frontend that demonstrates the backend behavior clearly
 
 ## Tech Stack
 
-- Next.js 16 App Router
+- Next.js 16 (App Router)
 - React 19
-- SQLite via `better-sqlite3`
+- SQLite with `better-sqlite3`
 - REST-style API routes
 
-## Run Locally
+## Why This Structure
+
+The project keeps page/UI concerns and backend logic separate while still staying simple to run:
+
+- `app/` contains the Next.js entry points and API route exports
+- `backend/` contains database setup, business logic, validation, auth/access control, and route handlers
+- `frontend/` contains the dashboard UI and styling
+- `backend/data/` stores the local SQLite database file
+
+This keeps the architecture easy to review without overengineering the assignment.
+
+## Local Setup
 
 ### Prerequisites
 
 - Node.js 20+
 - npm 10+
 
-### Installation and Start
+### Install and Run
 
 ```bash
 npm install
@@ -48,149 +49,278 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Production Build Check
+### Production Check
 
 ```bash
 npm run build
 npm start
 ```
 
-## Features
+## Seeded Demo Users
 
-- Send and view messages with timestamps
-- Delete messages only for the current profile
-- Delete messages for everyone with a visible placeholder
-- Pin and unpin important messages
-- Poll for updates every 2 seconds
-- Persist chat data after refresh
+The app ships with seeded users so the reviewer can immediately test permissions from the frontend.
 
-## Approach and Design Decisions
+| Name | Role | Status | Purpose |
+| --- | --- | --- | --- |
+| Arjun Mehta | Admin | Active | Full access to users and records |
+| Sara Khan | Analyst | Active | Can read records and dashboard insights |
+| Nisha Roy | Viewer | Active | Can read dashboard summaries only |
+| Kabir Sen | Analyst | Inactive | Demonstrates inactive access restriction |
 
-- Next.js App Router was used so the page and API handlers live in one framework while still supporting clear frontend/backend module boundaries.
-- A dedicated frontend folder keeps UI logic isolated from server concerns.
-- A dedicated backend folder keeps data access and route handlers modular and reusable.
-- SQLite with better-sqlite3 was selected for a zero-setup local database and deterministic behavior.
-- Message deletion for everyone keeps a placeholder instead of hard-delete for better conversation traceability.
-- Polling every 2 seconds was chosen over websockets to keep the implementation lightweight and easy to run.
+The frontend includes a role switcher that changes the acting user context. Backend authorization is still enforced server-side through the `x-user-id` header.
 
-## Tradeoffs and Assumptions
+## Assignment Mapping
 
-### Tradeoffs
+### 1. User and Role Management
 
-- Polling is simpler than websockets but less efficient for high-scale real-time updates.
-- SQLite is easy for local and small deployments but not ideal for horizontally scaled multi-instance production.
-- The app uses a shared room model without channels/threads to keep scope focused.
+Implemented through:
 
-### Assumptions
+- `GET /api/users`
+- `POST /api/users`
+- `GET /api/users/:id`
+- `PATCH /api/users/:id`
 
-- User identity is simulated by profile switching in the UI (no authentication system).
-- Message payloads are trusted only after backend validation.
-- A message deleted for everyone should remain visible as a deletion notice.
+Behavior:
 
-## API Documentation
+- Admins can create users and update roles/status
+- All active authenticated users can read the user directory
+- Inactive users are blocked from access entirely
 
-### Base URL
+### 2. Financial Records Management
 
-- Local: http://localhost:3000
-- Production: use your deployed domain
+Implemented through:
 
-### Endpoints
+- `GET /api/records`
+- `POST /api/records`
+- `GET /api/records/:id`
+- `PATCH /api/records/:id`
+- `DELETE /api/records/:id`
 
-1. GET /api/messages?userId=ava
+Supported fields:
 
-- Description: returns all visible messages for a given user profile.
-- Query params:
-  - userId (required)
-- Success response: 200
+- `amount`
+- `type`
+- `category`
+- `date`
+- `notes`
+
+Supported filters:
+
+- `type`
+- `category`
+- `dateFrom`
+- `dateTo`
+- `search`
+- pagination via `page` and `pageSize`
+
+### 3. Dashboard Summary APIs
+
+Implemented through:
+
+- `GET /api/dashboard/summary?months=6`
+
+Returns:
+
+- total income
+- total expenses
+- net balance
+- category-wise totals
+- recent activity
+- monthly trend data
+- counts of income and expense records
+
+### 4. Access Control Logic
+
+Implemented in backend helpers and enforced by route handlers.
+
+Permission model:
+
+- `viewer`: can read dashboard summaries only
+- `analyst`: can read dashboard summaries and financial records
+- `admin`: can manage users and fully manage financial records
+
+Access is enforced in the backend, not only in the UI.
+
+### 5. Validation and Error Handling
+
+The backend validates:
+
+- missing or malformed JSON bodies
+- invalid user roles or statuses
+- invalid email format
+- invalid record types
+- invalid date format
+- invalid amount values
+- invalid pagination values
+- invalid date range filters
+
+Errors return appropriate HTTP status codes such as `400`, `401`, `403`, `404`, and `500`.
+
+### 6. Data Persistence
+
+SQLite is used for local persistence. The database file is created automatically at:
+
+- `backend/data/finance-dashboard.db`
+
+The app seeds initial users and records on first run.
+
+## API Reference
+
+### Authentication Context
+
+This project uses mock authentication to keep the assignment focused on backend design.
+
+Pass the acting user with:
+
+- request header: `x-user-id: <userId>`
+
+The frontend already does this automatically.
+
+### `GET /api/users`
+
+Returns all users.
+
+Example response:
 
 ```json
 {
-  "messages": [
+  "users": [
     {
       "id": 1,
-      "senderId": "ava",
-      "senderName": "Ava Patel",
-      "content": "Daily update",
-      "createdAt": "2026-04-06T12:08:05.946Z",
-      "isDeletedForEveryone": false,
-      "isPinned": true
+      "name": "Arjun Mehta",
+      "email": "arjun.m@finveil.local",
+      "role": "admin",
+      "status": "active",
+      "createdAt": "2026-04-08T00:00:00.000Z",
+      "updatedAt": "2026-04-08T00:00:00.000Z"
     }
   ]
 }
 ```
 
-2. POST /api/messages
+### `POST /api/users`
 
-- Description: creates a new message.
-- Request body:
+Admin only.
 
-```json
-{
-  "senderId": "ava",
-  "senderName": "Ava Patel",
-  "content": "Hello team"
-}
-```
-
-- Success response: 201
+Request body:
 
 ```json
 {
-  "message": {
-    "id": 2,
-    "senderId": "ava",
-    "senderName": "Ava Patel",
-    "content": "Hello team",
-    "createdAt": "2026-04-06T12:10:00.000Z",
-    "isDeletedForEveryone": false,
-    "isPinned": false
-  }
+  "name": "Mira Das",
+  "email": "mira.d@finveil.local",
+  "role": "viewer",
+  "status": "active"
 }
 ```
 
-3. DELETE /api/messages/:id?scope=me&userId=ava
+### `PATCH /api/users/:id`
 
-- Description: hides the message only for the specified user profile.
-- Query params:
-  - scope=me
-  - userId (required when scope is me)
+Admin only. Supports partial updates.
 
-4. DELETE /api/messages/:id?scope=everyone
-
-- Description: marks the message as deleted for everyone and replaces content with a deletion notice.
-
-5. PATCH /api/messages/:id/pin
-
-- Description: pins or unpins a message.
-- Request body:
+Example body:
 
 ```json
 {
-  "pinned": true
+  "role": "analyst",
+  "status": "inactive"
 }
 ```
 
-### Error Handling
+### `GET /api/records`
 
-- Invalid requests return 400 with an error message.
-- Not found resources return 404 with an error message.
+Analyst or admin only.
 
-## Data Model
+Query params:
 
-The app uses two SQLite tables:
+- `page`
+- `pageSize`
+- `type`
+- `category`
+- `dateFrom`
+- `dateTo`
+- `search`
 
-- messages for content, sender, timestamps, pinned state, and deleted-for-everyone state
-- message_hidden for per-user delete-for-me behavior
+### `POST /api/records`
 
-Database files are stored in backend/data/.
+Admin only.
 
-## Commit History
+Request body:
 
-Meaningful commit history should reflect progress in steps instead of one large dump. A good pattern is:
+```json
+{
+  "amount": 12500,
+  "type": "income",
+  "category": "Consulting",
+  "date": "2026-04-08",
+  "notes": "Advisory engagement payment"
+}
+```
 
-1. chore: scaffold the app
-2. feat: add persistent chat APIs
-3. feat: build the chat interface
-4. docs: add setup and usage notes
+### `PATCH /api/records/:id`
 
-This repository is structured to support that kind of multi-step submission.
+Admin only. Supports partial updates.
+
+### `DELETE /api/records/:id`
+
+Admin only.
+
+### `GET /api/dashboard/summary?months=6`
+
+Available to viewer, analyst, and admin users.
+
+## Frontend Notes
+
+The frontend is intentionally included even though the assignment is backend-heavy because it helps demonstrate:
+
+- permission-aware rendering
+- record creation and editing flows
+- user management flows
+- dashboard aggregation output
+- role switching for quick evaluation
+
+It is not just a CRUD table pasted on top of APIs; the UI is designed to make the backend logic obvious during review.
+
+## Key Design Decisions
+
+- **SQLite for simplicity**: zero external setup, deterministic local behavior, persistent storage
+- **Mock auth via header**: enough to demonstrate access control without adding unnecessary auth complexity
+- **Service-style backend modules**: keeps route handlers thin and business logic reusable
+- **Strict backend enforcement**: UI hides actions, but server checks are the real source of truth
+- **Seed data**: makes the project reviewable immediately after `npm install` and `npm run dev`
+
+## Assumptions and Tradeoffs
+
+### Assumptions
+
+- The assignment values backend reasoning more than full authentication implementation
+- One local SQLite database is sufficient for this assessment scope
+- Amounts are stored internally in paise/cents (`amount_cents`) to avoid floating point persistence issues
+
+### Tradeoffs
+
+- Authentication is mocked rather than token-based to keep scope focused
+- SQLite is ideal for local demo and assessment work, but not for horizontally scaled production systems
+- The dashboard summary is global rather than scoped per user because the assignment describes a shared finance dashboard system
+
+## Nice-to-Have Enhancements Included
+
+- pagination for record listing
+- note search filter
+- seeded sample data
+- responsive UI
+- mock multi-user switching for access-control demonstration
+
+## If You Want To Deploy
+
+This project can be deployed as a standard Next.js app. For persistent hosting, the main consideration would be using a persistent filesystem or swapping SQLite for a managed database.
+
+## Submission Summary
+
+This repository is meant to be upload-ready as-is. It demonstrates:
+
+- backend architecture and separation of concerns
+- business logic and access rules
+- financial data processing
+- validation and API behavior
+- persistence and seeded sample data
+- a reviewer-friendly frontend for fast evaluation

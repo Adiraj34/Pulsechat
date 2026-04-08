@@ -1,9 +1,9 @@
 import "../frontend/globals.css";
 
 export const metadata = {
-  title: "PulseChat",
+  title: "FinVeil Control Center",
   description:
-    "A polished real-time style chat application built with Next.js and SQLite.",
+    "Finance dashboard backend assignment with role-aware analytics and record management.",
 };
 
 export default function RootLayout({ children }) {

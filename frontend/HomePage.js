@@ -1,435 +1,744 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const CHAT_USERS = [
-  { id: "ava", name: "Ava Patel", accent: "var(--accent-warm)" },
-  { id: "liam", name: "Liam Carter", accent: "var(--accent-cool)" },
-];
+const DEFAULT_USER_ID = 1;
 
-const POLL_INTERVAL = 2000;
-const BOTTOM_THRESHOLD = 48;
+const EMPTY_RECORD_FORM = {
+  amount: "",
+  type: "expense",
+  category: "",
+  date: new Date().toISOString().slice(0, 10),
+  notes: "",
+};
 
-function isNearBottom(element) {
-  if (!element) {
-    return true;
-  }
+const EMPTY_USER_FORM = {
+  name: "",
+  email: "",
+  role: "viewer",
+  status: "active",
+};
 
-  const distanceFromBottom =
-    element.scrollHeight - element.scrollTop - element.clientHeight;
-  return distanceFromBottom <= BOTTOM_THRESHOLD;
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
 }
 
-function formatTimestamp(timestamp) {
+function formatRole(role) {
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function formatDate(value) {
   return new Intl.DateTimeFormat("en-IN", {
-    hour: "numeric",
-    minute: "2-digit",
     day: "numeric",
     month: "short",
-  }).format(new Date(timestamp));
+    year: "numeric",
+  }).format(new Date(`${value}T00:00:00`));
+}
+
+function monthLabel(value) {
+  return new Intl.DateTimeFormat("en-IN", {
+    month: "short",
+    year: "2-digit",
+  }).format(new Date(`${value}-01T00:00:00`));
 }
 
 export default function HomePage() {
-  const [activeUserId, setActiveUserId] = useState(CHAT_USERS[0].id);
-  const [messages, setMessages] = useState([]);
-  const [draft, setDraft] = useState("");
+  const [activeUserId, setActiveUserId] = useState(DEFAULT_USER_ID);
+  const [users, setUsers] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [recordsState, setRecordsState] = useState({
+    records: [],
+    pagination: { page: 1, pageSize: 10, total: 0, totalPages: 1 },
+    categories: [],
+  });
+  const [filters, setFilters] = useState({
+    type: "",
+    category: "",
+    dateFrom: "",
+    dateTo: "",
+    search: "",
+    page: 1,
+  });
+  const [recordForm, setRecordForm] = useState(EMPTY_RECORD_FORM);
+  const [editingRecordId, setEditingRecordId] = useState(null);
+  const [userForm, setUserForm] = useState(EMPTY_USER_FORM);
+  const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSending, setIsSending] = useState(false);
-  const [openMenuId, setOpenMenuId] = useState(null);
-  const messagesAreaRef = useRef(null);
-  const shouldAutoScrollRef = useRef(true);
-  const scrollBehaviorRef = useRef("auto");
+  const [isBooting, setIsBooting] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const activeUser =
-    CHAT_USERS.find((user) => user.id === activeUserId) ?? CHAT_USERS[0];
+  const activeUser = useMemo(
+    () => users.find((user) => user.id === activeUserId) || null,
+    [users, activeUserId],
+  );
 
-  async function loadMessages({ preserveLoading = true } = {}) {
-    if (preserveLoading) {
-      setIsLoading(true);
-    }
+  const canViewRecords = activeUser?.role === "analyst" || activeUser?.role === "admin";
+  const canManageRecords = activeUser?.role === "admin";
+  const canManageUsers = activeUser?.role === "admin";
 
-    try {
-      const response = await fetch(`/api/messages?userId=${activeUser.id}`, {
-        cache: "no-store",
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load messages.");
-      }
-
-      setMessages(data.messages);
-      setError("");
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      if (preserveLoading) {
-        setIsLoading(false);
-      }
-    }
-  }
-
-  useEffect(() => {
-    shouldAutoScrollRef.current = true;
-    scrollBehaviorRef.current = "auto";
-    loadMessages();
-  }, [activeUser.id]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      loadMessages({ preserveLoading: false });
-    }, POLL_INTERVAL);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeUser.id]);
-
-  useEffect(() => {
-    function handleWindowClick() {
-      setOpenMenuId(null);
-    }
-
-    function handleEscape(event) {
-      if (event.key === "Escape") {
-        setOpenMenuId(null);
-      }
-    }
-
-    window.addEventListener("click", handleWindowClick);
-    window.addEventListener("keydown", handleEscape);
-
-    return () => {
-      window.removeEventListener("click", handleWindowClick);
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, []);
-
-  useEffect(() => {
-    const area = messagesAreaRef.current;
-
-    if (!area || !shouldAutoScrollRef.current) {
-      return;
-    }
-
-    area.scrollTo({
-      top: area.scrollHeight,
-      behavior: scrollBehaviorRef.current,
+  async function request(path, options = {}) {
+    const response = await fetch(path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-id": String(activeUserId),
+        ...(options.headers || {}),
+      },
+      cache: "no-store",
     });
-    scrollBehaviorRef.current = "auto";
-  }, [messages]);
 
-  function handleMessagesScroll(event) {
-    shouldAutoScrollRef.current = isNearBottom(event.currentTarget);
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "Request failed.");
+    }
+
+    return data;
   }
 
-  async function handleSendMessage(event) {
-    event.preventDefault();
-    const trimmedDraft = draft.trim();
+  async function loadUsers() {
+    const data = await request("/api/users");
+    setUsers(data.users);
+    return data.users;
+  }
 
-    if (!trimmedDraft) {
-      setError("Type a message before sending.");
+  async function loadSummary() {
+    const data = await request("/api/dashboard/summary?months=6");
+    setSummary(data.summary);
+  }
+
+  async function loadRecords(nextFilters = filters, role = activeUser?.role) {
+    const hasRecordAccess = role === "analyst" || role === "admin";
+
+    if (!hasRecordAccess) {
+      setRecordsState((current) => ({
+        ...current,
+        records: [],
+        pagination: { page: 1, pageSize: 10, total: 0, totalPages: 1 },
+      }));
       return;
     }
 
-    if (trimmedDraft.length > 500) {
-      setError("Messages must stay within 500 characters.");
-      return;
-    }
+    const params = new URLSearchParams();
+    params.set("page", String(nextFilters.page || 1));
+    params.set("pageSize", "10");
+
+    ["type", "category", "dateFrom", "dateTo", "search"].forEach((key) => {
+      if (nextFilters[key]) {
+        params.set(key, nextFilters[key]);
+      }
+    });
+
+    const data = await request(`/api/records?${params.toString()}`);
+    setRecordsState({
+      records: data.records,
+      pagination: data.pagination,
+      categories: data.categories,
+    });
+  }
+
+  async function refreshDashboard({ keepMessage = true } = {}) {
+    setIsRefreshing(true);
 
     try {
-      setIsSending(true);
-      const response = await fetch("/api/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          senderId: activeUser.id,
-          senderName: activeUser.name,
-          content: trimmedDraft,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to send message.");
-      }
-
-      setDraft("");
+      const nextUsers = await loadUsers();
+      const nextActor = nextUsers.find((user) => user.id === activeUserId) || null;
+      await loadSummary();
+      await loadRecords(filters, nextActor?.role);
       setError("");
-      shouldAutoScrollRef.current = true;
-      scrollBehaviorRef.current = "smooth";
-      await loadMessages({ preserveLoading: false });
-    } catch (sendError) {
-      setError(sendError.message);
+      if (!keepMessage) {
+        setFeedback("");
+      }
+    } catch (refreshError) {
+      setError(refreshError.message);
     } finally {
-      setIsSending(false);
+      setIsRefreshing(false);
+      setIsBooting(false);
     }
   }
 
-  async function handleDelete(messageId, scope) {
+  useEffect(() => {
+    refreshDashboard({ keepMessage: false });
+  }, [activeUserId]);
+
+  useEffect(() => {
+    if (isBooting || !activeUser) {
+      return;
+    }
+
+    loadRecords(filters, activeUser.role).catch((loadError) =>
+      setError(loadError.message),
+    );
+  }, [filters.page, activeUser?.role]);
+
+  function resetRecordForm() {
+    setRecordForm({
+      ...EMPTY_RECORD_FORM,
+      date: new Date().toISOString().slice(0, 10),
+    });
+    setEditingRecordId(null);
+  }
+
+  async function handleRecordSubmit(event) {
+    event.preventDefault();
+
     try {
-      const search = new URLSearchParams({ scope });
-      if (scope === "me") {
-        search.set("userId", activeUser.id);
+      const payload = {
+        amount: Number(recordForm.amount),
+        type: recordForm.type,
+        category: recordForm.category,
+        date: recordForm.date,
+        notes: recordForm.notes,
+      };
+
+      if (editingRecordId) {
+        await request(`/api/records/${editingRecordId}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+        setFeedback("Financial record updated successfully.");
+      } else {
+        await request("/api/records", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        setFeedback("Financial record created successfully.");
       }
 
-      const response = await fetch(
-        `/api/messages/${messageId}?${search.toString()}`,
-        {
-          method: "DELETE",
-        },
-      );
-      const data = await response.json();
+      resetRecordForm();
+      await refreshDashboard();
+    } catch (submitError) {
+      setFeedback("");
+      setError(submitError.message);
+    }
+  }
 
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to delete message.");
+  async function handleRecordDelete(recordId) {
+    try {
+      await request(`/api/records/${recordId}`, { method: "DELETE" });
+      if (editingRecordId === recordId) {
+        resetRecordForm();
       }
-
-      setOpenMenuId(null);
-      await loadMessages({ preserveLoading: false });
+      setFeedback("Financial record deleted successfully.");
+      await refreshDashboard();
     } catch (deleteError) {
+      setFeedback("");
       setError(deleteError.message);
     }
   }
 
-  async function handleTogglePin(messageId, pinned) {
+  async function handleCreateUser(event) {
+    event.preventDefault();
+
     try {
-      const response = await fetch(`/api/messages/${messageId}/pin`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ pinned }),
+      await request("/api/users", {
+        method: "POST",
+        body: JSON.stringify(userForm),
       });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to update pinned state.");
-      }
-
-      setOpenMenuId(null);
-      await loadMessages({ preserveLoading: false });
-    } catch (pinError) {
-      setError(pinError.message);
+      setUserForm(EMPTY_USER_FORM);
+      setFeedback("User created successfully.");
+      await refreshDashboard();
+    } catch (submitError) {
+      setFeedback("");
+      setError(submitError.message);
     }
   }
 
-  const pinnedMessages = messages.filter((message) => message.isPinned);
+  async function handleUserUpdate(userId, patch) {
+    try {
+      await request(`/api/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      setFeedback("User updated successfully.");
+      await refreshDashboard();
+    } catch (updateError) {
+      setFeedback("");
+      setError(updateError.message);
+    }
+  }
+
+  function applyFilters(event) {
+    event.preventDefault();
+    setFilters((current) => ({ ...current, page: 1 }));
+    loadRecords({ ...filters, page: 1 }).catch((loadError) => setError(loadError.message));
+  }
+
+  const categoryLeaders = summary?.categoryTotals?.slice(0, 5) || [];
+  const trend = summary?.trend || [];
+  const maxTrendValue = Math.max(
+    1,
+    ...trend.flatMap((item) => [item.income, item.expense, Math.abs(item.net)]),
+  );
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">Realtime-ready team messaging</p>
-          <h1>PulseChat</h1>
-          <p className="hero-copy">
-            A polished chat experience with persistent history, delete-for-me,
-            delete-for-everyone, pinned updates, and lightweight live refresh.
+    <main className="page-shell">
+      <div className="backdrop backdrop-a" />
+      <div className="backdrop backdrop-b" />
+      <section className="hero-card">
+        <div className="hero-copy">
+          <p className="eyebrow">Backend Assessment Submission</p>
+          <h1>FinVeil Control Center</h1>
+          <p className="hero-text">
+            A role-aware finance dashboard built with Next.js and SQLite. The backend handles
+            user management, financial records, summary analytics, validation, and permission
+            checks, while the frontend demonstrates the workflow clearly for reviewers.
           </p>
+          <div className="hero-metrics" aria-label="Live summary highlights">
+            <div className="hero-metric-card">
+              <span>Income</span>
+              <strong>{formatCurrency(summary?.totals?.totalIncome || 0)}</strong>
+            </div>
+            <div className="hero-metric-card">
+              <span>Expenses</span>
+              <strong>{formatCurrency(summary?.totals?.totalExpenses || 0)}</strong>
+            </div>
+            <div className="hero-metric-card">
+              <span>Net</span>
+              <strong>{formatCurrency(summary?.totals?.netBalance || 0)}</strong>
+            </div>
+          </div>
         </div>
 
-        <div className="presence-panel">
-          <span className="presence-label">Active profile</span>
-          <div className="user-switcher">
-            {CHAT_USERS.map((user) => (
+        <div className="identity-panel">
+          <p className="eyebrow">Mock Access Context</p>
+          <div className="identity-list">
+            {users.map((user) => (
               <button
                 key={user.id}
+                className={`identity-chip ${user.id === activeUserId ? "active" : ""}`}
+                onClick={() => {
+                  setActiveUserId(user.id);
+                  setFeedback("");
+                  setError("");
+                }}
                 type="button"
-                className={
-                  user.id === activeUser.id ? "user-chip active" : "user-chip"
-                }
-                onClick={() => setActiveUserId(user.id)}
-                style={{ "--user-accent": user.accent }}
               >
-                {user.name}
+                <span>{user.name}</span>
+                <small>
+                  {formatRole(user.role)} · {user.status}
+                </small>
               </button>
             ))}
           </div>
-          <p className="presence-note">
-            Switch profiles to simulate another user and verify per-user delete
-            behavior.
-          </p>
+          {activeUser ? (
+            <div className="identity-meta">
+              <span className={`role-pill ${activeUser.role}`}>{formatRole(activeUser.role)}</span>
+              <span className={`status-pill ${activeUser.status}`}>{activeUser.status}</span>
+            </div>
+          ) : null}
         </div>
       </section>
 
-      <section className="board">
-        <aside className="pinned-panel">
-          <div className="panel-title-row">
+      {error ? <div className="message-banner error">{error}</div> : null}
+      {feedback ? <div className="message-banner success">{feedback}</div> : null}
+
+      <section className="grid-top">
+        <div className="panel summary-panel">
+          <div className="panel-head">
             <div>
-              <p className="panel-kicker">Pinned board</p>
-              <h2>Important messages</h2>
+              <p className="eyebrow">Dashboard Summary</p>
+              <h2>Financial Snapshot</h2>
             </div>
-            <span className="count-pill">{pinnedMessages.length}</span>
+            <button className="ghost-button" onClick={() => refreshDashboard()} type="button">
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
           </div>
 
-          {pinnedMessages.length > 0 ? (
-            <div className="pinned-list">
-              {pinnedMessages.map((message) => (
-                <article key={`pinned-${message.id}`} className="pinned-card">
-                  <div className="pinned-meta">
-                    <strong>{message.senderName}</strong>
-                    <span>{formatTimestamp(message.createdAt)}</span>
-                  </div>
-                  <p>{message.content}</p>
-                </article>
-              ))}
+          <div className="stat-grid">
+            <article className="stat-card income">
+              <span>Total Income</span>
+              <strong>{formatCurrency(summary?.totals?.totalIncome || 0)}</strong>
+            </article>
+            <article className="stat-card expense">
+              <span>Total Expenses</span>
+              <strong>{formatCurrency(summary?.totals?.totalExpenses || 0)}</strong>
+            </article>
+            <article className="stat-card balance">
+              <span>Net Balance</span>
+              <strong>{formatCurrency(summary?.totals?.netBalance || 0)}</strong>
+            </article>
+            <article className="stat-card neutral">
+              <span>Tracked Entries</span>
+              <strong>
+                {(summary?.breakdown?.incomeCount || 0) + (summary?.breakdown?.expenseCount || 0)}
+              </strong>
+            </article>
+          </div>
+
+          <div className="trend-grid">
+            {trend.map((item) => (
+              <div className="trend-card" key={item.month}>
+                <div className="trend-bars">
+                  <span
+                    className="bar income"
+                    style={{ height: `${Math.max(10, (item.income / maxTrendValue) * 120)}px` }}
+                  />
+                  <span
+                    className="bar expense"
+                    style={{ height: `${Math.max(10, (item.expense / maxTrendValue) * 120)}px` }}
+                  />
+                </div>
+                <strong>{monthLabel(item.month)}</strong>
+                <small>{formatCurrency(item.net)}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel side-panel">
+          <div className="panel-head compact">
+            <div>
+              <p className="eyebrow">Aggregations</p>
+              <h2>Category Totals</h2>
             </div>
+          </div>
+          <div className="leader-list">
+            {categoryLeaders.map((item) => (
+              <div className="leader-row" key={`${item.type}-${item.category}`}>
+                <div>
+                  <strong>{item.category}</strong>
+                  <small>{formatRole(item.type)}</small>
+                </div>
+                <span>{formatCurrency(item.total)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="recent-box">
+            <p className="eyebrow">Recent Activity</p>
+            {(summary?.recentActivity || []).map((item) => (
+              <div className="recent-row" key={item.id}>
+                <div>
+                  <strong>{item.category}</strong>
+                  <small>
+                    {formatDate(item.date)} by {item.createdByName}
+                  </small>
+                </div>
+                <span className={item.type === "income" ? "amount-positive" : "amount-negative"}>
+                  {item.type === "income" ? "+" : "-"}
+                  {formatCurrency(item.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid-bottom">
+        <div className="panel records-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Records</p>
+              <h2>Financial Entries</h2>
+            </div>
+            <div className="hint-text">
+              {canViewRecords
+                ? "Analysts and admins can inspect filtered records."
+                : "Viewer access is intentionally limited to dashboard summaries only."}
+            </div>
+          </div>
+
+          {canViewRecords ? (
+            <>
+              <form className="filter-grid" onSubmit={applyFilters}>
+                <input
+                  className="input"
+                  placeholder="Search notes"
+                  value={filters.search}
+                  onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+                />
+                <select
+                  className="input"
+                  value={filters.type}
+                  onChange={(event) => setFilters((current) => ({ ...current, type: event.target.value }))}
+                >
+                  <option value="">All types</option>
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                </select>
+                <select
+                  className="input"
+                  value={filters.category}
+                  onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}
+                >
+                  <option value="">All categories</option>
+                  {recordsState.categories.map((item) => (
+                    <option key={item.category} value={item.category}>
+                      {item.category}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="input"
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
+                />
+                <button className="primary-button" type="submit">
+                  Apply filters
+                </button>
+              </form>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Category</th>
+                      <th>Type</th>
+                      <th>Amount</th>
+                      <th>Notes</th>
+                      <th>Owner</th>
+                      {canManageRecords ? <th>Actions</th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recordsState.records.map((record) => (
+                      <tr key={record.id}>
+                        <td>{formatDate(record.date)}</td>
+                        <td>{record.category}</td>
+                        <td>
+                          <span className={`inline-tag ${record.type}`}>{record.type}</span>
+                        </td>
+                        <td>{formatCurrency(record.amount)}</td>
+                        <td>{record.notes || "-"}</td>
+                        <td>{record.createdByName}</td>
+                        {canManageRecords ? (
+                          <td>
+                            <div className="action-row">
+                              <button
+                                className="ghost-button small"
+                                onClick={() => {
+                                  setEditingRecordId(record.id);
+                                  setRecordForm({
+                                    amount: String(record.amount),
+                                    type: record.type,
+                                    category: record.category,
+                                    date: record.date,
+                                    notes: record.notes,
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="danger-button small"
+                                onClick={() => handleRecordDelete(record.id)}
+                                type="button"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        ) : null}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pagination-row">
+                <span>
+                  Page {recordsState.pagination.page} of {recordsState.pagination.totalPages}
+                </span>
+                <div className="action-row">
+                  <button
+                    className="ghost-button small"
+                    disabled={recordsState.pagination.page <= 1}
+                    onClick={() =>
+                      setFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))
+                    }
+                    type="button"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="ghost-button small"
+                    disabled={recordsState.pagination.page >= recordsState.pagination.totalPages}
+                    onClick={() =>
+                      setFilters((current) => ({
+                        ...current,
+                        page: Math.min(recordsState.pagination.totalPages, current.page + 1),
+                      }))
+                    }
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
           ) : (
-            <div className="empty-state">
-              <p>Pin a message to keep decisions and reminders visible here.</p>
+            <div className="viewer-state">
+              <h3>Viewer mode is active</h3>
+              <p>
+                This role can inspect high-level financial performance but cannot list or modify
+                individual records. That restriction is enforced in the backend as well.
+              </p>
             </div>
           )}
-        </aside>
+        </div>
 
-        <section className="chat-panel">
-          <div className="chat-header">
-            <div>
-              <p className="panel-kicker">Conversation</p>
-              <h2>Team room</h2>
-            </div>
-            <div className="live-indicator">
-              <span className="live-dot" />
-              Polling every {POLL_INTERVAL / 1000}s
-            </div>
-          </div>
-
-          <div
-            className="messages-area"
-            ref={messagesAreaRef}
-            onScroll={handleMessagesScroll}
-          >
-            {isLoading ? (
-              <div className="status-card">Loading messages...</div>
-            ) : messages.length === 0 ? (
-              <div className="status-card">
-                No messages yet. Start the conversation below.
+        <div className="stack-column">
+          <div className="panel form-panel">
+            <div className="panel-head compact">
+              <div>
+                <p className="eyebrow">Admin Tools</p>
+                <h2>{editingRecordId ? "Edit Record" : "Create Record"}</h2>
               </div>
+            </div>
+            {canManageRecords ? (
+              <form className="form-grid" onSubmit={handleRecordSubmit}>
+                <input
+                  className="input"
+                  placeholder="Amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={recordForm.amount}
+                  onChange={(event) => setRecordForm((current) => ({ ...current, amount: event.target.value }))}
+                  required
+                />
+                <select
+                  className="input"
+                  value={recordForm.type}
+                  onChange={(event) => setRecordForm((current) => ({ ...current, type: event.target.value }))}
+                >
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                </select>
+                <input
+                  className="input"
+                  placeholder="Category"
+                  value={recordForm.category}
+                  onChange={(event) => setRecordForm((current) => ({ ...current, category: event.target.value }))}
+                  required
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={recordForm.date}
+                  onChange={(event) => setRecordForm((current) => ({ ...current, date: event.target.value }))}
+                  required
+                />
+                <textarea
+                  className="input textarea"
+                  placeholder="Notes or description"
+                  value={recordForm.notes}
+                  onChange={(event) => setRecordForm((current) => ({ ...current, notes: event.target.value }))}
+                />
+                <div className="action-row">
+                  <button className="primary-button" type="submit">
+                    {editingRecordId ? "Save changes" : "Create record"}
+                  </button>
+                  {editingRecordId ? (
+                    <button className="ghost-button" onClick={resetRecordForm} type="button">
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </form>
             ) : (
-              messages.map((message) => {
-                const isOwn = message.senderId === activeUser.id;
-                return (
-                  <article
-                    key={message.id}
-                    className={
-                      isOwn ? "message-card own-message" : "message-card"
-                    }
-                  >
-                    <div className="message-topline">
-                      <div className="message-author">
-                        <strong>{message.senderName}</strong>
-                        {message.isPinned ? (
-                          <span className="tag">Pinned</span>
-                        ) : null}
-                        {message.isDeletedForEveryone ? (
-                          <span className="tag muted">Deleted</span>
-                        ) : null}
-                      </div>
-                      <time>{formatTimestamp(message.createdAt)}</time>
-                    </div>
-
-                    <p
-                      className={
-                        message.isDeletedForEveryone
-                          ? "message-copy deleted-copy"
-                          : "message-copy"
-                      }
-                    >
-                      {message.content}
-                    </p>
-
-                    <div className="message-actions">
-                      <div
-                        className="message-menu"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="menu-trigger"
-                          aria-label="Open message actions"
-                          aria-expanded={openMenuId === message.id}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setOpenMenuId((current) =>
-                              current === message.id ? null : message.id,
-                            );
-                          }}
-                        >
-                          ...
-                        </button>
-
-                        {openMenuId === message.id ? (
-                          <div className="menu-dropdown" role="menu">
-                            <button
-                              type="button"
-                              className="menu-item"
-                              onClick={() => handleDelete(message.id, "me")}
-                            >
-                              Delete for me
-                            </button>
-                            <button
-                              type="button"
-                              className="menu-item danger"
-                              onClick={() =>
-                                handleDelete(message.id, "everyone")
-                              }
-                              disabled={message.isDeletedForEveryone}
-                            >
-                              Delete for everyone
-                            </button>
-                            <button
-                              type="button"
-                              className="menu-item"
-                              onClick={() =>
-                                handleTogglePin(message.id, !message.isPinned)
-                              }
-                              disabled={message.isDeletedForEveryone}
-                            >
-                              {message.isPinned ? "Unpin" : "Pin"}
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </article>
-                );
-              })
+              <p className="muted-copy">
+                Only admins can create, update, or delete financial records.
+              </p>
             )}
           </div>
 
-          <form className="composer" onSubmit={handleSendMessage}>
-            <label className="composer-label" htmlFor="messageInput">
-              Message as {activeUser.name}
-            </label>
-            <div className="composer-row">
-              <textarea
-                id="messageInput"
-                className="composer-input"
-                placeholder="Share an update, ask a question, or pin an important note..."
-                value={draft}
-                maxLength={500}
-                onChange={(event) => setDraft(event.target.value)}
-                rows={3}
-              />
-              <button
-                type="submit"
-                className="send-button"
-                disabled={isSending}
-              >
-                {isSending ? "Sending..." : "Send"}
-              </button>
+          <div className="panel form-panel">
+            <div className="panel-head compact">
+              <div>
+                <p className="eyebrow">User Control</p>
+                <h2>Manage Access</h2>
+              </div>
             </div>
-            <div className="composer-footer">
-              <span>{draft.trim().length}/500</span>
-              {error ? (
-                <span className="error-text">{error}</span>
-              ) : (
-                <span>Changes are saved automatically.</span>
-              )}
-            </div>
-          </form>
-        </section>
+
+            {canManageUsers ? (
+              <>
+                <form className="form-grid" onSubmit={handleCreateUser}>
+                  <input
+                    className="input"
+                    placeholder="Full name"
+                    value={userForm.name}
+                    onChange={(event) => setUserForm((current) => ({ ...current, name: event.target.value }))}
+                    required
+                  />
+                  <input
+                    className="input"
+                    placeholder="Email address"
+                    type="email"
+                    value={userForm.email}
+                    onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))}
+                    required
+                  />
+                  <select
+                    className="input"
+                    value={userForm.role}
+                    onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="analyst">Analyst</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <select
+                    className="input"
+                    value={userForm.status}
+                    onChange={(event) => setUserForm((current) => ({ ...current, status: event.target.value }))}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                  <button className="primary-button" type="submit">
+                    Create user
+                  </button>
+                </form>
+
+                <div className="user-admin-list">
+                  {users.map((user) => (
+                    <div className="user-admin-row" key={user.id}>
+                      <div>
+                        <strong>{user.name}</strong>
+                        <small>{user.email}</small>
+                      </div>
+                      <div className="action-row wrap">
+                        <select
+                          className="input inline-select"
+                          value={user.role}
+                          onChange={(event) => handleUserUpdate(user.id, { role: event.target.value })}
+                        >
+                          <option value="viewer">Viewer</option>
+                          <option value="analyst">Analyst</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <select
+                          className="input inline-select"
+                          value={user.status}
+                          onChange={(event) => handleUserUpdate(user.id, { status: event.target.value })}
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="muted-copy">Only admins can create users or change role assignments.</p>
+            )}
+          </div>
+        </div>
       </section>
     </main>
   );

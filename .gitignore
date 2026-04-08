@@ -5,3 +5,4 @@ backend/data/*.db-*
 dist
 coverage
 *.log
+.DS_Store
